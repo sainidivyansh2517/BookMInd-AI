@@ -1,0 +1,17 @@
+[
+  {
+    "_id": "id_1786992441151_0e20n8q",
+    "name": "Divyansh Saini",
+    "email": "divyanshsainijnvsre@gmail.com",
+    "passwordHash": "$2a$10$LziDowGSbWwdYH37dXsczuYv5cMEHUMAthVaJTUcHKb1vOF1o4/X2",
+    "readingGoal": 10,
+    "favoriteGenres": [
+      "Productivity",
+      "Self-Improvement",
+      "Fiction",
+      "Technology"
+    ],
+    "createdAt": "2026-08-17T18:47:21.151Z",
+    "updatedAt": "2026-08-17T18:47:21.153Z"
+  }
+]

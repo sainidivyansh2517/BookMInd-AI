@@ -1,0 +1,28 @@
+[
+  {
+    "_id": "id_1786992480190_6a34uev",
+    "userId": "id_1786992441151_0e20n8q",
+    "openLibraryId": "OL17590212W",
+    "title": "The Subtle Art of Not Giving a F*ck",
+    "authors": [
+      "Mark Manson"
+    ],
+    "coverUrl": "https://covers.openlibrary.org/b/id/8231990-L.jpg",
+    "publishYear": 2016,
+    "totalPages": 224,
+    "progressPages": 25,
+    "status": "want_to_read",
+    "rating": 0,
+    "genres": [
+      "Self-realization",
+      "Conduct of life",
+      "Conducta de vida",
+      "nyt:advice-how-to-and-miscellaneous=2016-10-02",
+      "New York Times bestseller"
+    ],
+    "description": "",
+    "addedAt": "2026-08-17T18:48:00.190Z",
+    "createdAt": "2026-08-17T18:48:00.190Z",
+    "updatedAt": "2026-08-17T18:48:34.232Z"
+  }
+]
