@@ -1,33 +1,42 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import axios from 'axios';
-import { Compass, Sparkles, Plus, Check } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Compass, Sparkles, Plus, Check, AlertCircle, RefreshCw } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Button } from '../components/ui/Button';
 import { BookCover } from '../components/books/BookCover';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import { useToast } from '../context/ToastContext';
 
+const fetchRecommendations = async ({ signal }) => {
+  const res = await axios.get('/api/ai/recommendations', { signal });
+  return res.data.recommendations || [];
+};
+
 export const RecommendationsPage = () => {
-  const [recommendations, setRecommendations] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [addingTitle, setAddingTitle] = useState(null);
   const [addedMap, setAddedMap] = useState({});
   const { addToast } = useToast();
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    fetchRecommendations();
-  }, []);
+  const {
+    data: recommendations = [],
+    isLoading: loading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+  } = useQuery({
+    queryKey: ['recommendations'],
+    queryFn: fetchRecommendations,
+    staleTime: 10 * 60 * 1000, // 10 min client-side freshness (server caches for 12h)
+    retry: 1,
+  });
 
-  const fetchRecommendations = async () => {
-    try {
-      setLoading(true);
-      const res = await axios.get('/api/ai/recommendations');
-      setRecommendations(res.data.recommendations || []);
-    } catch (err) {
-      addToast('Failed to generate recommendations.', 'error');
-    } finally {
-      setLoading(false);
-    }
+  const handleRefresh = async () => {
+    // Force server-side cache invalidation by using ?refresh=true
+    await axios.get('/api/ai/recommendations?refresh=true');
+    queryClient.invalidateQueries({ queryKey: ['recommendations'] });
   };
 
   const handleAddRecommendation = async (rec) => {
@@ -43,6 +52,8 @@ export const RecommendationsPage = () => {
 
       setAddedMap((prev) => ({ ...prev, [rec.title]: true }));
       addToast(`"${rec.title}" added to your library!`, 'success');
+      // Books changed — invalidate cache so dashboard reflects it
+      queryClient.invalidateQueries({ queryKey: ['books'] });
     } catch (err) {
       addToast(err.response?.data?.message || 'Could not add book.', 'error');
     } finally {
@@ -65,14 +76,27 @@ export const RecommendationsPage = () => {
               Books Picked for You
             </h1>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-              Tailored book recommendations synthesized from your reading history, ratings, and note topics.
+              Tailored recommendations synthesized from your reading history, ratings, and note topics.
             </p>
           </div>
 
-          <Button variant="outline" icon={Sparkles} isLoading={loading} onClick={fetchRecommendations}>
+          <Button variant="outline" icon={Sparkles} isLoading={isFetching} onClick={handleRefresh}>
             Refresh Picks
           </Button>
         </div>
+
+        {/* Error state — graceful, not broken */}
+        {isError && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '20px', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', color: 'var(--text-secondary)' }}>
+            <AlertCircle size={18} color="var(--text-muted)" />
+            <span style={{ flex: 1, fontSize: '0.9rem' }}>
+              Recommendations are temporarily unavailable. {error?.response?.data?.message || ''}
+            </span>
+            <Button size="sm" variant="outline" icon={RefreshCw} onClick={() => refetch()}>
+              Try Again
+            </Button>
+          </div>
+        )}
 
         {/* Recommendations List */}
         {loading ? (
@@ -81,7 +105,7 @@ export const RecommendationsPage = () => {
             <SkeletonCard />
             <SkeletonCard />
           </div>
-        ) : recommendations.length > 0 ? (
+        ) : !isError && recommendations.length > 0 ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '24px' }}>
             {recommendations.map((rec, idx) => {
               const isAdded = addedMap[rec.title];
@@ -90,17 +114,7 @@ export const RecommendationsPage = () => {
               return (
                 <div
                   key={idx}
-                  style={{
-                    backgroundColor: 'var(--bg-surface)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: 'var(--radius-xl)',
-                    padding: '24px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    gap: '16px',
-                    boxShadow: 'var(--shadow-sm)'
-                  }}
+                  style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-xl)', padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '16px', boxShadow: 'var(--shadow-sm)' }}
                 >
                   <div style={{ display: 'flex', gap: '16px' }}>
                     <div style={{ width: '80px', flexShrink: 0 }}>
@@ -147,11 +161,11 @@ export const RecommendationsPage = () => {
               );
             })}
           </div>
-        ) : (
+        ) : !isError && !loading ? (
           <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
             Read a few books and capture notes to enable AI recommendations!
           </div>
-        )}
+        ) : null}
 
       </div>
     </AppShell>

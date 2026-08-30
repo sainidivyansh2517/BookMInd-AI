@@ -1,18 +1,22 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { PageSkeleton } from './components/ui/Skeleton';
 
+// Eagerly load auth-critical pages (tiny, shown immediately on first visit)
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { LibraryPage } from './pages/LibraryPage';
-import { BookDetailsPage } from './pages/BookDetailsPage';
-import { NotesPage } from './pages/NotesPage';
-import { RecommendationsPage } from './pages/RecommendationsPage';
-import { AIAssistantPage } from './pages/AIAssistantPage';
-import { ProfilePage } from './pages/ProfilePage';
-import { SettingsPage } from './pages/SettingsPage';
+
+// Lazy-load all protected app pages for code splitting
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const LibraryPage = lazy(() => import('./pages/LibraryPage').then(m => ({ default: m.LibraryPage })));
+const BookDetailsPage = lazy(() => import('./pages/BookDetailsPage').then(m => ({ default: m.BookDetailsPage })));
+const NotesPage = lazy(() => import('./pages/NotesPage').then(m => ({ default: m.NotesPage })));
+const RecommendationsPage = lazy(() => import('./pages/RecommendationsPage').then(m => ({ default: m.RecommendationsPage })));
+const AIAssistantPage = lazy(() => import('./pages/AIAssistantPage').then(m => ({ default: m.AIAssistantPage })));
+const ProfilePage = lazy(() => import('./pages/ProfilePage').then(m => ({ default: m.ProfilePage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
 
 // Protected Route Wrapper
 const ProtectedRoute = ({ children }) => {
@@ -49,6 +53,7 @@ const PublicOnlyRoute = ({ children }) => {
 export default function App() {
   return (
     <Routes>
+      {/* Public routes - eagerly loaded */}
       <Route path="/" element={<LandingPage />} />
       <Route
         path="/login"
@@ -67,15 +72,87 @@ export default function App() {
         }
       />
 
-      {/* Protected SaaS App Routes */}
-      <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-      <Route path="/books" element={<ProtectedRoute><LibraryPage /></ProtectedRoute>} />
-      <Route path="/books/:id" element={<ProtectedRoute><BookDetailsPage /></ProtectedRoute>} />
-      <Route path="/notes" element={<ProtectedRoute><NotesPage /></ProtectedRoute>} />
-      <Route path="/recommendations" element={<ProtectedRoute><RecommendationsPage /></ProtectedRoute>} />
-      <Route path="/ai" element={<ProtectedRoute><AIAssistantPage /></ProtectedRoute>} />
-      <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
-      <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+      {/* Protected lazy-loaded app routes */}
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <Suspense fallback={<PageSkeleton />}>
+              <DashboardPage />
+            </Suspense>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/books"
+        element={
+          <ProtectedRoute>
+            <Suspense fallback={<PageSkeleton />}>
+              <LibraryPage />
+            </Suspense>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/books/:id"
+        element={
+          <ProtectedRoute>
+            <Suspense fallback={<PageSkeleton />}>
+              <BookDetailsPage />
+            </Suspense>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/notes"
+        element={
+          <ProtectedRoute>
+            <Suspense fallback={<PageSkeleton />}>
+              <NotesPage />
+            </Suspense>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/recommendations"
+        element={
+          <ProtectedRoute>
+            <Suspense fallback={<PageSkeleton />}>
+              <RecommendationsPage />
+            </Suspense>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ai"
+        element={
+          <ProtectedRoute>
+            <Suspense fallback={<PageSkeleton />}>
+              <AIAssistantPage />
+            </Suspense>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <Suspense fallback={<PageSkeleton />}>
+              <ProfilePage />
+            </Suspense>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <ProtectedRoute>
+            <Suspense fallback={<PageSkeleton />}>
+              <SettingsPage />
+            </Suspense>
+          </ProtectedRoute>
+        }
+      />
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />

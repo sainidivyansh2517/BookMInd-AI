@@ -1,42 +1,26 @@
 const { BookRepo } = require('../models/Book');
 const { NoteRepo } = require('../models/Note');
+const { RecommendationRepo } = require('../models/Recommendation');
 const OpenLibraryService = require('../services/openLibraryService');
 
 const getLibrary = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { status, search, sort } = req.query;
+    const { status, search, sort, page, limit } = req.query;
 
-    let books = await BookRepo.findByUser(userId);
+    const result = await BookRepo.findByUser(userId, {
+      status,
+      search,
+      sort,
+      page,
+      limit
+    });
 
-    // Filter by status
-    if (status && status !== 'all') {
-      books = books.filter(b => b.status === status);
+    if (page && limit) {
+      return res.json(result);
     }
 
-    // Filter by search query
-    if (search && search.trim()) {
-      const q = search.toLowerCase().trim();
-      books = books.filter(b => 
-        (b.title && b.title.toLowerCase().includes(q)) ||
-        (b.authors && b.authors.some(a => a.toLowerCase().includes(q))) ||
-        (b.genres && b.genres.some(g => g.toLowerCase().includes(q)))
-      );
-    }
-
-    // Sort
-    if (sort === 'title') {
-      books.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
-    } else if (sort === 'author') {
-      books.sort((a, b) => ((a.authors && a.authors[0]) || '').localeCompare((b.authors && b.authors[0]) || ''));
-    } else if (sort === 'rating') {
-      books.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-    } else {
-      // Default: recently added
-      books.sort((a, b) => new Date(b.addedAt || 0) - new Date(a.addedAt || 0));
-    }
-
-    return res.json({ books });
+    return res.json({ books: result });
   } catch (error) {
     console.error('getLibrary error:', error);
     return res.status(500).json({ message: 'Failed to fetch personal library.' });
@@ -87,11 +71,12 @@ const addBook = async (req, res) => {
       return res.status(400).json({ message: 'Book title is required.' });
     }
 
-    // Check if book already added by openLibraryId or title
+    // Check duplicate by title or openLibraryId
     const existingBooks = await BookRepo.findByUser(userId);
-    const duplicate = existingBooks.find(b => 
+    const booksList = Array.isArray(existingBooks) ? existingBooks : (existingBooks.books || []);
+    const duplicate = booksList.find(b => 
       (openLibraryId && b.openLibraryId === openLibraryId) ||
-      (b.title.toLowerCase() === title.toLowerCase())
+      (b.title.toLowerCase() === title.trim().toLowerCase())
     );
 
     if (duplicate) {
@@ -112,6 +97,9 @@ const addBook = async (req, res) => {
       genres: Array.isArray(genres) ? genres : [],
       description: description || ''
     });
+
+    // Invalidate recommendation cache on library change
+    await RecommendationRepo.invalidateUser(userId);
 
     return res.status(201).json({
       message: 'Book added to library successfully.',
@@ -135,14 +123,16 @@ const updateBook = async (req, res) => {
 
     const { status, progressPages, totalPages, rating, review, genres, description } = req.body;
     const updateData = {};
+    let shouldInvalidateRecs = false;
 
     if (status) {
       updateData.status = status;
-      if (status === 'completed') {
+      if (status === 'completed' && book.status !== 'completed') {
         updateData.completedAt = new Date().toISOString();
         if (book.totalPages > 0) {
           updateData.progressPages = book.totalPages;
         }
+        shouldInvalidateRecs = true;
       }
     }
 
@@ -151,19 +141,30 @@ const updateBook = async (req, res) => {
       updateData.progressPages = p;
 
       // Auto completed if progress reached 100%
-      if (book.totalPages > 0 && p >= book.totalPages) {
+      if (book.totalPages > 0 && p >= book.totalPages && book.status !== 'completed') {
         updateData.status = 'completed';
         updateData.completedAt = new Date().toISOString();
+        shouldInvalidateRecs = true;
       }
     }
 
     if (totalPages !== undefined) updateData.totalPages = Number(totalPages);
-    if (rating !== undefined) updateData.rating = Number(rating);
+    if (rating !== undefined) {
+      updateData.rating = Number(rating);
+      if (Number(rating) !== book.rating) shouldInvalidateRecs = true;
+    }
     if (review !== undefined) updateData.review = review;
-    if (genres) updateData.genres = genres;
+    if (genres) {
+      updateData.genres = genres;
+      shouldInvalidateRecs = true;
+    }
     if (description !== undefined) updateData.description = description;
 
     const updated = await BookRepo.updateById(bookId, updateData);
+
+    if (shouldInvalidateRecs) {
+      await RecommendationRepo.invalidateUser(userId);
+    }
 
     return res.json({
       message: 'Book updated successfully.',
@@ -186,6 +187,7 @@ const deleteBook = async (req, res) => {
     }
 
     await BookRepo.deleteById(bookId);
+    await RecommendationRepo.invalidateUser(userId);
 
     return res.json({ message: 'Book removed from library.' });
   } catch (error) {
@@ -195,12 +197,12 @@ const deleteBook = async (req, res) => {
 
 const searchBooks = async (req, res) => {
   try {
-    const { q } = req.query;
-    if (!q) {
+    const { q, limit } = req.query;
+    if (!q || !q.trim()) {
       return res.json({ results: [] });
     }
 
-    const results = await OpenLibraryService.searchBooks(q);
+    const results = await OpenLibraryService.searchBooks(q.trim(), limit ? parseInt(limit, 10) : 15);
     return res.json({ results });
   } catch (error) {
     return res.status(500).json({ message: 'Error searching OpenLibrary.' });

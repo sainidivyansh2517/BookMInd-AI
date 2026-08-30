@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { UserRepo } = require('../models/User');
+const { RecommendationRepo } = require('../models/Recommendation');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'bookmind_super_secret_jwt_key_2026';
 
@@ -140,7 +141,10 @@ const updateProfile = async (req, res) => {
 
     if (name) updateData.name = name.trim();
     if (readingGoal !== undefined) updateData.readingGoal = Number(readingGoal);
-    if (favoriteGenres) updateData.favoriteGenres = favoriteGenres;
+    if (favoriteGenres) {
+      updateData.favoriteGenres = favoriteGenres;
+      await RecommendationRepo.invalidateUser(req.user.id);
+    }
     if (avatar !== undefined) updateData.avatar = avatar;
 
     const updatedUser = await UserRepo.updateById(req.user.id, updateData);
@@ -162,3 +166,4 @@ const updateProfile = async (req, res) => {
 };
 
 module.exports = { register, login, logout, getMe, updateProfile };
+

@@ -4,44 +4,57 @@ const { BookRepo } = require('../models/Book');
 const getNotes = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { bookId, tag, search } = req.query;
+    const { bookId, tag, search, page, limit } = req.query;
 
-    let notes = await NoteRepo.findByUser(userId);
+    const result = await NoteRepo.findByUser(userId, {
+      bookId,
+      tag,
+      search,
+      page,
+      limit
+    });
 
-    if (bookId) {
-      notes = notes.filter(n => String(n.bookId) === String(bookId));
-    }
+    const isPaginated = page && limit;
+    const rawNotes = isPaginated ? result.notes : result;
 
-    if (tag) {
-      const cleanTag = tag.replace('#', '').toLowerCase();
-      notes = notes.filter(n => n.tags && n.tags.some(t => t.toLowerCase() === cleanTag));
-    }
+    // Collect unique bookIds from the returned notes
+    const uniqueBookIds = [...new Set(rawNotes.map(n => n.bookId).filter(Boolean))];
+    const bookMap = {};
 
-    if (search && search.trim()) {
-      const q = search.toLowerCase().trim();
-      notes = notes.filter(n => 
-        (n.title && n.title.toLowerCase().includes(q)) ||
-        (n.content && n.content.toLowerCase().includes(q)) ||
-        (n.tags && n.tags.some(t => t.toLowerCase().includes(q)))
+    if (uniqueBookIds.length > 0) {
+      await Promise.all(
+        uniqueBookIds.map(async (bId) => {
+          try {
+            const b = await BookRepo.findById(bId);
+            if (b) {
+              bookMap[bId] = {
+                id: b._id || b.id,
+                title: b.title,
+                coverUrl: b.coverUrl,
+                authors: b.authors
+              };
+            }
+          } catch (e) {
+            // Ignore missing book
+          }
+        })
       );
     }
 
-    // Attach book title & cover preview if bookId is present
-    const userBooks = await BookRepo.findByUser(userId);
-    const bookMap = {};
-    userBooks.forEach(b => {
-      bookMap[b._id || b.id] = {
-        id: b._id || b.id,
-        title: b.title,
-        coverUrl: b.coverUrl,
-        authors: b.authors
-      };
-    });
-
-    const enrichedNotes = notes.map(n => ({
+    const enrichedNotes = rawNotes.map(n => ({
       ...n,
       book: n.bookId ? bookMap[n.bookId] || null : null
     }));
+
+    if (isPaginated) {
+      return res.json({
+        notes: enrichedNotes,
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: result.totalPages
+      });
+    }
 
     return res.json({ notes: enrichedNotes });
   } catch (error) {
@@ -87,6 +100,14 @@ const createNote = async (req, res) => {
       return res.status(400).json({ message: 'Note content cannot be empty.' });
     }
 
+    // Verify book ownership if bookId is supplied
+    if (bookId) {
+      const book = await BookRepo.findById(bookId);
+      if (!book || String(book.userId) !== String(userId)) {
+        return res.status(403).json({ message: 'Cannot attach note to a book you do not own.' });
+      }
+    }
+
     // Sanitize tags
     let tagList = [];
     if (Array.isArray(tags)) {
@@ -128,7 +149,15 @@ const updateNote = async (req, res) => {
 
     if (title) updateData.title = title.trim();
     if (content) updateData.content = content.trim();
-    if (bookId !== undefined) updateData.bookId = bookId || null;
+    if (bookId !== undefined) {
+      if (bookId) {
+        const book = await BookRepo.findById(bookId);
+        if (!book || String(book.userId) !== String(userId)) {
+          return res.status(403).json({ message: 'Cannot attach note to a book you do not own.' });
+        }
+      }
+      updateData.bookId = bookId || null;
+    }
     if (tags !== undefined) {
       if (Array.isArray(tags)) {
         updateData.tags = tags;

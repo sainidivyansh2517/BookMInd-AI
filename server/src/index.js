@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { connectDB } = require('./config/db');
 
 const authRoutes = require('./routes/authRoutes');
@@ -15,8 +16,9 @@ const PORT = process.env.PORT || 5000;
 connectDB();
 
 // Middleware
+const allowedOrigin = process.env.CLIENT_URL || true;
 app.use(cors({
-  origin: true,
+  origin: allowedOrigin,
   credentials: true
 }));
 app.use(express.json());
@@ -32,7 +34,17 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'BookMind AI Server is operational.' });
 });
 
-// 404 Handler
+// Serve frontend in production (monolith / single container deployment)
+if (process.env.NODE_ENV === 'production') {
+  const clientDist = path.join(__dirname, '../../client/dist');
+  app.use(express.static(clientDist));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+}
+
+// 404 Handler for API
 app.use((req, res) => {
   res.status(404).json({ message: 'Requested API endpoint not found.' });
 });

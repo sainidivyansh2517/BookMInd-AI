@@ -100,5 +100,6 @@ module.exports = {
   usersStore: new JsonStore('users'),
   booksStore: new JsonStore('books'),
   notesStore: new JsonStore('notes'),
-  chatsStore: new JsonStore('chats')
+  chatsStore: new JsonStore('chats'),
+  recommendationsStore: new JsonStore('recommendations')
 };

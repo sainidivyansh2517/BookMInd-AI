@@ -143,3 +143,19 @@ button {
   border-radius: var(--radius-sm);
   color: var(--accent-primary);
 }
+
+/* Streaming cursor blink for AI chat */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* Spin utility for loading indicators */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}

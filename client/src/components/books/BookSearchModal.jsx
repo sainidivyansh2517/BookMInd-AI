@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Search, Loader2, Plus, Check } from 'lucide-react';
 import { Modal } from '../ui/Modal';
@@ -6,6 +6,7 @@ import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { BookCover } from './BookCover';
 import { useToast } from '../../context/ToastContext';
+import { useQueryClient } from '@tanstack/react-query';
 
 export const BookSearchModal = ({ isOpen, onClose, onBookAdded }) => {
   const [query, setQuery] = useState('');
@@ -14,27 +15,51 @@ export const BookSearchModal = ({ isOpen, onClose, onBookAdded }) => {
   const [addingId, setAddingId] = useState(null);
   const [addedMap, setAddedMap] = useState({});
   const { addToast } = useToast();
+  const queryClient = useQueryClient();
+
+  // AbortController ref to cancel in-flight search requests
+  const abortCtrlRef = useRef(null);
 
   useEffect(() => {
     if (!query.trim()) {
       setResults([]);
+      setLoading(false);
       return;
     }
 
     const timer = setTimeout(async () => {
+      // Cancel any in-flight request before starting a new one
+      abortCtrlRef.current?.abort();
+      const ctrl = new AbortController();
+      abortCtrlRef.current = ctrl;
+
       try {
         setLoading(true);
-        const res = await axios.get(`/api/books/search?q=${encodeURIComponent(query.trim())}`);
+        const res = await axios.get(`/api/books/search?q=${encodeURIComponent(query.trim())}`, {
+          signal: ctrl.signal
+        });
         setResults(res.data.results || []);
       } catch (err) {
+        if (axios.isCancel(err) || err.name === 'AbortError' || err.code === 'ERR_CANCELED') return;
         addToast('Failed to search OpenLibrary.', 'error');
       } finally {
-        setLoading(false);
+        if (!ctrl.signal.aborted) setLoading(false);
       }
     }, 400);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+    };
   }, [query, addToast]);
+
+  // Cleanup on close
+  useEffect(() => {
+    if (!isOpen) {
+      abortCtrlRef.current?.abort();
+      setQuery('');
+      setResults([]);
+    }
+  }, [isOpen]);
 
   const handleAddBook = async (book, status = 'want_to_read') => {
     try {
@@ -54,6 +79,10 @@ export const BookSearchModal = ({ isOpen, onClose, onBookAdded }) => {
 
       setAddedMap((prev) => ({ ...prev, [bookKey]: true }));
       addToast(`"${book.title}" added to your library!`, 'success');
+
+      // Invalidate shared books cache
+      queryClient.invalidateQueries({ queryKey: ['books'] });
+
       if (onBookAdded) onBookAdded();
     } catch (err) {
       addToast(err.response?.data?.message || 'Could not add book to library.', 'error');

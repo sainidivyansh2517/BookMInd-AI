@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { BookOpen, BookMarked, Target, Clock, ArrowRight, Plus, Sparkles, FileText } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { BookOpen, BookMarked, Target, Plus, Sparkles, FileText, RefreshCw, AlertCircle } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Button } from '../components/ui/Button';
 import { BookCover } from '../components/books/BookCover';
@@ -9,40 +10,66 @@ import { ProgressBar } from '../components/ui/ProgressBar';
 import { NoteCard } from '../components/notes/NoteCard';
 import { SkeletonCard, SkeletonRow } from '../components/ui/Skeleton';
 import { useAuth } from '../context/AuthContext';
-import { useToast } from '../context/ToastContext';
+import { useQueryClient } from '@tanstack/react-query';
+
+// === API fetch helpers ===
+const fetchBooks = async () => {
+  const res = await axios.get('/api/books');
+  return res.data.books || [];
+};
+
+const fetchNotes = async () => {
+  const res = await axios.get('/api/notes');
+  return res.data.notes || [];
+};
+
+const fetchRecommendations = async () => {
+  const res = await axios.get('/api/ai/recommendations');
+  return res.data.recommendations || [];
+};
 
 export const DashboardPage = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { addToast } = useToast();
+  const queryClient = useQueryClient();
 
-  const [loading, setLoading] = useState(true);
-  const [books, setBooks] = useState([]);
-  const [notes, setNotes] = useState([]);
-  const [recommendations, setRecommendations] = useState([]);
+  // Independent query per section — none blocks the others
+  const {
+    data: books = [],
+    isLoading: isBooksLoading,
+  } = useQuery({
+    queryKey: ['books'],
+    queryFn: fetchBooks,
+    staleTime: 2 * 60 * 1000,
+  });
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
+  const {
+    data: notes = [],
+    isLoading: isNotesLoading,
+  } = useQuery({
+    queryKey: ['notes'],
+    queryFn: fetchNotes,
+    staleTime: 2 * 60 * 1000,
+  });
 
-  const fetchDashboardData = async () => {
-    try {
-      setLoading(true);
-      const [booksRes, notesRes, recsRes] = await Promise.all([
-        axios.get('/api/books'),
-        axios.get('/api/notes'),
-        axios.get('/api/ai/recommendations')
-      ]);
+  // AI recs are FULLY independent — no blocking
+  const {
+    data: recommendations = [],
+    isLoading: isRecsLoading,
+    isError: isRecsError,
+    refetch: refetchRecs,
+  } = useQuery({
+    queryKey: ['recommendations'],
+    queryFn: fetchRecommendations,
+    staleTime: 10 * 60 * 1000, // 10 min — they're server-cached for 12h
+    retry: 1,
+  });
 
-      setBooks(booksRes.data.books || []);
-      setNotes(notesRes.data.notes || []);
-      setRecommendations(recsRes.data.recommendations || []);
-    } catch (err) {
-      addToast('Failed to load dashboard data.', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Invalidate books + notes when a book is added via AppShell
+  const handleBookAdded = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['books'] });
+    queryClient.invalidateQueries({ queryKey: ['notes'] });
+  }, [queryClient]);
 
   // Dynamic Greeting based on hour
   const getGreeting = () => {
@@ -52,19 +79,18 @@ export const DashboardPage = () => {
     return 'Good evening';
   };
 
-  // Calculate Metrics
+  // Calculate Metrics from books (shows immediately after books load)
   const completedBooks = books.filter((b) => b.status === 'completed');
   const currentlyReading = books.filter((b) => b.status === 'currently_reading');
   const wantToRead = books.filter((b) => b.status === 'want_to_read');
   const readingGoal = user?.readingGoal || 24;
-
   const activeBook = currentlyReading[0] || books[0];
 
   return (
-    <AppShell onBookAdded={fetchDashboardData}>
+    <AppShell onBookAdded={handleBookAdded}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '32px', maxWidth: '1100px', margin: '0 auto' }}>
         
-        {/* Dynamic Header */}
+        {/* Dynamic Header — renders immediately */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '16px' }}>
           <div>
             <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.85rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
@@ -79,42 +105,34 @@ export const DashboardPage = () => {
           </Button>
         </div>
 
-        {/* 4 KPI Cards Section */}
+        {/* 4 KPI Cards — render once books load, skeletons until then */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-          <StatCard
-            icon={BookCheckIcon}
-            label="Books Read"
-            value={completedBooks.length}
-            subtext="Finished title(s)"
-            color="var(--status-success)"
-          />
-          <StatCard
-            icon={BookOpen}
-            label="Currently Reading"
-            value={currentlyReading.length}
-            subtext="In active progress"
-            color="var(--accent-primary)"
-          />
-          <StatCard
-            icon={BookMarked}
-            label="Want to Read"
-            value={wantToRead.length}
-            subtext="Saved to wishlist"
-            color="var(--status-warning)"
-          />
-          <StatCard
-            icon={Target}
-            label="Reading Goal"
-            value={`${completedBooks.length} / ${readingGoal}`}
-            subtext={`${Math.round((completedBooks.length / readingGoal) * 100)}% achieved`}
-            color="var(--accent-text)"
-          />
+          {isBooksLoading ? (
+            <>
+              {[...Array(4)].map((_, i) => (
+                <div key={i} style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '20px', display: 'flex', gap: '16px', alignItems: 'center' }}>
+                  <div className="skeleton-pulse" style={{ width: '44px', height: '44px', borderRadius: 'var(--radius-md)', flexShrink: 0 }} />
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div className="skeleton-pulse" style={{ height: '12px', width: '60%' }} />
+                    <div className="skeleton-pulse" style={{ height: '26px', width: '40%' }} />
+                  </div>
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              <StatCard icon={BookCheckIcon} label="Books Read" value={completedBooks.length} subtext="Finished title(s)" color="var(--status-success)" />
+              <StatCard icon={BookOpen} label="Currently Reading" value={currentlyReading.length} subtext="In active progress" color="var(--accent-primary)" />
+              <StatCard icon={BookMarked} label="Want to Read" value={wantToRead.length} subtext="Saved to wishlist" color="var(--status-warning)" />
+              <StatCard icon={Target} label="Reading Goal" value={`${completedBooks.length} / ${readingGoal}`} subtext={`${Math.min(100, Math.round((completedBooks.length / readingGoal) * 100))}% achieved`} color="var(--accent-text)" />
+            </>
+          )}
         </div>
 
         {/* Main 2-Column Section */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '24px' }}>
           
-          {/* Left Column: Continue Reading Hero */}
+          {/* Left: Continue Reading */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>
@@ -127,24 +145,13 @@ export const DashboardPage = () => {
               )}
             </div>
 
-            {loading ? (
+            {isBooksLoading ? (
               <SkeletonCard />
             ) : activeBook ? (
-              <div
-                style={{
-                  display: 'flex',
-                  gap: '20px',
-                  backgroundColor: 'var(--bg-surface)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: 'var(--radius-xl)',
-                  padding: '24px',
-                  boxShadow: 'var(--shadow-sm)'
-                }}
-              >
+              <div style={{ display: 'flex', gap: '20px', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-xl)', padding: '24px', boxShadow: 'var(--shadow-sm)' }}>
                 <div style={{ width: '110px', flexShrink: 0 }}>
                   <BookCover coverUrl={activeBook.coverUrl} title={activeBook.title} authors={activeBook.authors} />
                 </div>
-
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                   <div>
                     <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
@@ -157,7 +164,6 @@ export const DashboardPage = () => {
                       {Array.isArray(activeBook.authors) ? activeBook.authors.join(', ') : activeBook.authors}
                     </p>
                   </div>
-
                   <div style={{ marginTop: '16px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>
                       <span>Reading Progress</span>
@@ -166,7 +172,6 @@ export const DashboardPage = () => {
                       </span>
                     </div>
                     <ProgressBar value={activeBook.progressPages || 0} max={activeBook.totalPages || 250} />
-
                     <div style={{ marginTop: '16px', display: 'flex', gap: '10px' }}>
                       <Button size="sm" onClick={() => navigate(`/books/${activeBook._id || activeBook.id}`)}>
                         Continue Reading
@@ -179,7 +184,7 @@ export const DashboardPage = () => {
                 </div>
               </div>
             ) : (
-              <div style={{ padding: '32px', backgroundColor: 'var(--bg-surface)', border: '1px border-dashed var(--border-color)', borderRadius: 'var(--radius-lg)', textAlign: 'center' }}>
+              <div style={{ padding: '32px', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', textAlign: 'center' }}>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
                   You don't have any books marked as "Currently Reading" right now.
                 </p>
@@ -188,22 +193,23 @@ export const DashboardPage = () => {
             )}
           </div>
 
-          {/* Right Column: Recent Notes */}
+          {/* Right: Recent Notes */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                 Recent Notes
               </h2>
-              <button
-                onClick={() => navigate('/notes')}
-                style={{ fontSize: '0.8125rem', color: 'var(--accent-primary)', fontWeight: 600 }}
-              >
+              <button onClick={() => navigate('/notes')} style={{ fontSize: '0.8125rem', color: 'var(--accent-primary)', fontWeight: 600 }}>
                 View all
               </button>
             </div>
 
-            {loading ? (
-              <SkeletonRow />
+            {isNotesLoading ? (
+              <>
+                <SkeletonRow />
+                <SkeletonRow />
+                <SkeletonRow />
+              </>
             ) : notes.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {notes.slice(0, 3).map((note) => (
@@ -211,7 +217,7 @@ export const DashboardPage = () => {
                 ))}
               </div>
             ) : (
-              <div style={{ padding: '32px', backgroundColor: 'var(--bg-surface)', border: '1px border-dashed var(--border-color)', borderRadius: 'var(--radius-lg)', textAlign: 'center' }}>
+              <div style={{ padding: '32px', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', textAlign: 'center' }}>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
                   No personal notes saved yet. Capture your first idea from what you're reading.
                 </p>
@@ -221,10 +227,9 @@ export const DashboardPage = () => {
               </div>
             )}
           </div>
-
         </div>
 
-        {/* Personalized Recommendations Strip */}
+        {/* AI Recommendations — FULLY INDEPENDENT section */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -232,44 +237,57 @@ export const DashboardPage = () => {
               <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                 Recommended for You
               </h2>
+              {isRecsLoading && (
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  Personalizing...
+                </span>
+              )}
             </div>
-            <button
-              onClick={() => navigate('/recommendations')}
-              style={{ fontSize: '0.8125rem', color: 'var(--accent-primary)', fontWeight: 600 }}
-            >
+            <button onClick={() => navigate('/recommendations')} style={{ fontSize: '0.8125rem', color: 'var(--accent-primary)', fontWeight: 600 }}>
               See all picks
             </button>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
-            {recommendations.slice(0, 3).map((rec, idx) => (
-              <div
-                key={idx}
-                style={{
-                  backgroundColor: 'var(--bg-surface)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: 'var(--radius-lg)',
-                  padding: '16px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px'
-                }}
-              >
-                <div>
-                  <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--accent-primary)', textTransform: 'uppercase' }}>
-                    {rec.genre || 'Recommended'}
-                  </span>
-                  <h4 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)', marginTop: '2px' }}>
-                    {rec.title}
-                  </h4>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{rec.author}</p>
+          {isRecsLoading ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
+              {[...Array(3)].map((_, i) => (
+                <div key={i} style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div className="skeleton-pulse" style={{ height: '14px', width: '40%', borderRadius: 'var(--radius-sm)' }} />
+                  <div className="skeleton-pulse" style={{ height: '20px', width: '80%', borderRadius: 'var(--radius-sm)' }} />
+                  <div className="skeleton-pulse" style={{ height: '12px', width: '55%', borderRadius: 'var(--radius-sm)' }} />
+                  <div className="skeleton-pulse" style={{ height: '60px', width: '100%', borderRadius: 'var(--radius-sm)' }} />
                 </div>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, background: 'var(--bg-surface-subtle)', padding: '8px 10px', borderRadius: 'var(--radius-sm)' }}>
-                  "{rec.reason}"
-                </p>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : isRecsError ? (
+            // AI failure never breaks the dashboard
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '20px', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', color: 'var(--text-secondary)' }}>
+              <AlertCircle size={18} color="var(--text-muted)" />
+              <span style={{ flex: 1, fontSize: '0.9rem' }}>Recommendations are temporarily unavailable.</span>
+              <Button size="sm" variant="outline" icon={RefreshCw} onClick={() => refetchRecs()}>
+                Try Again
+              </Button>
+            </div>
+          ) : recommendations.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
+              {recommendations.slice(0, 3).map((rec, idx) => (
+                <div key={idx} style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div>
+                    <span style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--accent-primary)', textTransform: 'uppercase' }}>
+                      {rec.genre || 'Recommended'}
+                    </span>
+                    <h4 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)', marginTop: '2px' }}>
+                      {rec.title}
+                    </h4>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{rec.author}</p>
+                  </div>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, background: 'var(--bg-surface-subtle)', padding: '8px 10px', borderRadius: 'var(--radius-sm)' }}>
+                    "{rec.reason}"
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
 
       </div>
@@ -278,29 +296,8 @@ export const DashboardPage = () => {
 };
 
 const StatCard = ({ icon: Icon, label, value, subtext, color }) => (
-  <div
-    style={{
-      backgroundColor: 'var(--bg-surface)',
-      border: '1px solid var(--border-color)',
-      borderRadius: 'var(--radius-lg)',
-      padding: '20px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '16px'
-    }}
-  >
-    <div
-      style={{
-        width: '44px',
-        height: '44px',
-        borderRadius: 'var(--radius-md)',
-        backgroundColor: 'var(--bg-surface-subtle)',
-        color: color || 'var(--accent-primary)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center'
-      }}
-    >
+  <div style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '20px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+    <div style={{ width: '44px', height: '44px', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-surface-subtle)', color: color || 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <Icon size={22} />
     </div>
     <div>
