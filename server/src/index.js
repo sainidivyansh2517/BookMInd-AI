@@ -35,14 +35,14 @@ app.get('/api/health', (req, res) => {
 });
 
 // Serve frontend in production (monolith / single container deployment)
-if (process.env.NODE_ENV === 'production') {
-  const clientDist = path.join(__dirname, '../../client/dist');
-  app.use(express.static(clientDist));
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api')) return next();
-    res.sendFile(path.join(clientDist, 'index.html'));
-  });
-}
+// if (process.env.NODE_ENV === 'production') {
+//   const clientDist = path.join(__dirname, '../../client/dist');
+//   app.use(express.static(clientDist));
+//   app.get('*', (req, res, next) => {
+//     if (req.path.startsWith('/api')) return next();
+//     res.sendFile(path.join(clientDist, 'index.html'));
+//   });
+// }
 
 // 404 Handler for API
 app.use((req, res) => {
