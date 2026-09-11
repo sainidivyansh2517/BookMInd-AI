@@ -12,8 +12,8 @@ class GeminiService {
     }
   }
 
-  static getModel(aiClient) {
-    const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+  static getModel(aiClient, preferredModel) {
+    const modelName = preferredModel || process.env.GEMINI_MODEL || 'gemini-3.6-flash';
     return aiClient.getGenerativeModel({ model: modelName });
   }
 
@@ -67,24 +67,33 @@ ${desc ? `Description: ${desc}\n` : ''}${limitedNotes ? `User Notes on this book
     const fullPrompt = this.buildPromptPayload({ prompt, bookContext, userNotes, readingHistory, conversationHistory });
 
     if (apiKey && aiClient) {
-      try {
-        const model = this.getModel(aiClient);
-        const result = await model.generateContentStream(fullPrompt);
-        let accumulated = '';
+      const candidateModels = [
+        process.env.GEMINI_MODEL,
+        'gemini-3.6-flash',
+        'gemini-3.5-flash'
+      ].filter(Boolean);
+      const uniqueModels = [...new Set(candidateModels)];
 
-        for await (const chunk of result.stream) {
-          const chunkText = chunk.text();
-          if (chunkText) {
-            accumulated += chunkText;
-            if (onChunk) {
-              onChunk(chunkText);
+      for (const mName of uniqueModels) {
+        try {
+          const model = this.getModel(aiClient, mName);
+          const result = await model.generateContentStream(fullPrompt);
+          let accumulated = '';
+
+          for await (const chunk of result.stream) {
+            const chunkText = chunk.text();
+            if (chunkText) {
+              accumulated += chunkText;
+              if (onChunk) {
+                onChunk(chunkText);
+              }
             }
           }
-        }
 
-        if (accumulated) return accumulated;
-      } catch (error) {
-        console.error('Gemini streaming error:', error.message);
+          if (accumulated) return accumulated;
+        } catch (error) {
+          console.error(`Gemini streaming error (${mName}):`, error.message);
+        }
       }
     }
 
@@ -96,28 +105,29 @@ ${desc ? `Description: ${desc}\n` : ''}${limitedNotes ? `User Notes on this book
     return fallbackText;
   }
 
-  // Non-streaming chat response with single bounded retry
+  // Non-streaming chat response with model failover
   static async generateChatResponse({ prompt, bookContext, userNotes, readingHistory, conversationHistory = [] }) {
     const apiKey = process.env.GEMINI_API_KEY;
     const aiClient = this.getClient();
     const fullPrompt = this.buildPromptPayload({ prompt, bookContext, userNotes, readingHistory, conversationHistory });
 
     if (apiKey && aiClient) {
-      const maxRetries = 1;
-      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const candidateModels = [
+        process.env.GEMINI_MODEL,
+        'gemini-3.6-flash',
+        'gemini-3.5-flash'
+      ].filter(Boolean);
+      const uniqueModels = [...new Set(candidateModels)];
+
+      for (const mName of uniqueModels) {
         try {
-          const model = this.getModel(aiClient);
+          const model = this.getModel(aiClient, mName);
           const result = await model.generateContent(fullPrompt);
           const response = await result.response;
           const text = response.text();
           if (text) return text;
         } catch (error) {
-          console.error(`Gemini API attempt ${attempt + 1} failed:`, error.message);
-          // Do not retry on client/auth errors
-          if (error.message.includes('400') || error.message.includes('401') || error.message.includes('403') || attempt >= maxRetries) {
-            break;
-          }
-          await new Promise(r => setTimeout(r, 600)); // Short backoff
+          console.error(`Gemini API call (${mName}) failed:`, error.message);
         }
       }
     }
@@ -155,21 +165,30 @@ Provide exactly 4 high-quality book recommendations in strict JSON format:
 Return ONLY the raw JSON array without markdown formatting.`;
 
     if (apiKey && aiClient) {
-      try {
-        const model = this.getModel(aiClient);
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        let text = response.text() || '';
-        text = text.replace(/```json\s*/gi, '').replace(/```\s*$/g, '').trim();
-        const jsonMatch = text.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            return parsed;
+      const candidateModels = [
+        process.env.GEMINI_MODEL,
+        'gemini-3.6-flash',
+        'gemini-3.5-flash'
+      ].filter(Boolean);
+      const uniqueModels = [...new Set(candidateModels)];
+
+      for (const mName of uniqueModels) {
+        try {
+          const model = this.getModel(aiClient, mName);
+          const result = await model.generateContent(prompt);
+          const response = await result.response;
+          let text = response.text() || '';
+          text = text.replace(/```json\s*/gi, '').replace(/```\s*$/g, '').trim();
+          const jsonMatch = text.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              return parsed;
+            }
           }
+        } catch (err) {
+          console.error(`Gemini recommendations call failed (${mName}):`, err.message);
         }
-      } catch (err) {
-        console.error('Gemini recommendations call failed:', err.message);
       }
     }
 
