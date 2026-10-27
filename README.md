@@ -2,7 +2,7 @@
 
 BookMind AI is a reading management application built with the MERN stack and Google Gemini AI. It helps users organize their books, track reading progress, write notes, and get AI-powered assistance while reading.
 
-**Live Demo:** [BookMind AI](https://book-m-ind-ai.vercel.app)
+**Live Demo:** [BookMind AI](https://book-m-ind-ai-five.vercel.app/)
 
 **GitHub Repository:** [BookMind AI](https://github.com/sainidivyansh2517/BookMInd-AI)
 
