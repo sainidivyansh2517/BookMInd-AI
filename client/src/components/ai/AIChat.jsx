@@ -49,7 +49,8 @@ export const AIChat = ({ bookId = null, initialMessages = [], suggestedPrompts =
     const token = localStorage.getItem('bookmind_token') || '';
       const authHeader = token ? `Bearer ${token}` : (axios.defaults.headers.common['Authorization'] || '');
 
-      const apiUrl = `${import.meta.env.VITE_API_URL || ''}/api/ai/chat`;
+      const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+      const apiUrl = `${apiBase}/api/ai/chat`;
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {

@@ -11,6 +11,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import { BookSearchModal } from '../components/books/BookSearchModal';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 
 const fetchLibrary = async ({ statusFilter, sortBy, signal }) => {
   const res = await axios.get('/api/books', {
@@ -21,6 +22,7 @@ const fetchLibrary = async ({ statusFilter, sortBy, signal }) => {
 };
 
 export const LibraryPage = () => {
+  const { user } = useAuth();
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('recent');
@@ -33,10 +35,13 @@ export const LibraryPage = () => {
     data: books = [],
     isLoading: loading,
   } = useQuery({
-    queryKey: ['books', statusFilter, sortBy],
+    queryKey: ['books', user?.id, statusFilter, sortBy],
     queryFn: ({ signal }) => fetchLibrary({ statusFilter, sortBy, signal }),
     staleTime: 2 * 60 * 1000,
+    enabled: !!user?.id,
   });
+
+  const showLoading = !user?.id || loading;
 
   // Client-side search filtering (books already fetched)
   const filteredBooks = books.filter((b) => {
@@ -50,8 +55,8 @@ export const LibraryPage = () => {
   });
 
   const handleBookAdded = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['books'] });
-  }, [queryClient]);
+    queryClient.invalidateQueries({ queryKey: ['books', user?.id] });
+  }, [queryClient, user?.id]);
 
   const filterTabs = [
     { id: 'all', label: 'All Books' },
@@ -137,7 +142,7 @@ export const LibraryPage = () => {
         </div>
 
         {/* Books List / Grid View */}
-        {loading ? (
+        {showLoading ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '20px' }}>
             <SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard />
           </div>

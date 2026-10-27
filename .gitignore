@@ -5,10 +5,15 @@ server/node_modules/
 
 # Environment variables & Secrets
 .env
+.env.*
+*.env
+*.env.local
 .env.local
 .env.*.local
 server/.env
+server/*.env
 client/.env
+client/*.env
 
 # Build outputs
 client/dist/
@@ -17,7 +22,9 @@ build/
 
 # Local database store & uploads
 server/data/
+server/data/*
 data/
+data/*
 
 # Logs
 logs/

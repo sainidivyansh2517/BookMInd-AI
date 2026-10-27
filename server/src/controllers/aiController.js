@@ -5,13 +5,20 @@ const { UserRepo } = require('../models/User');
 const { RecommendationRepo } = require('../models/Recommendation');
 const GeminiService = require('../services/geminiService');
 
+const MAX_PROMPT_LENGTH = 4000;
+
 const handleChat = async (req, res) => {
   try {
     const userId = req.user.id;
     const { prompt, bookId, chatId, stream = true } = req.body;
 
-    if (!prompt || !prompt.trim()) {
+    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       return res.status(400).json({ message: 'Prompt query is required.' });
+    }
+
+    const cleanPrompt = prompt.trim();
+    if (cleanPrompt.length > MAX_PROMPT_LENGTH) {
+      return res.status(400).json({ message: `Prompt exceeds maximum allowed length of ${MAX_PROMPT_LENGTH} characters.` });
     }
 
     // Load contextual user data with strict ownership verification
@@ -25,12 +32,8 @@ const handleChat = async (req, res) => {
       }
       userNotes = await NoteRepo.findByBook(userId, bookId);
     } else {
-      userNotes = await NoteRepo.findByUser(userId, { limit: 12 });
-      if (Array.isArray(userNotes)) {
-        // ok
-      } else if (userNotes && userNotes.notes) {
-        userNotes = userNotes.notes;
-      }
+      const notesData = await NoteRepo.findByUser(userId, { limit: 12 });
+      userNotes = Array.isArray(notesData) ? notesData : (notesData.notes || []);
     }
 
     // Fetch lightweight library history
@@ -47,7 +50,9 @@ const handleChat = async (req, res) => {
     }
 
     if (!conversation) {
-      const title = bookContext ? `Query on ${bookContext.title}` : (prompt.slice(0, 32) + '...');
+      const title = bookContext 
+        ? `Query on ${bookContext.title.slice(0, 30)}` 
+        : (cleanPrompt.slice(0, 32) + '...');
       conversation = await ChatRepo.create({
         userId,
         bookId: bookId || null,
@@ -68,58 +73,77 @@ const handleChat = async (req, res) => {
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders?.();
 
-      let fullResponseText = '';
+      let clientDisconnected = false;
+      req.on('close', () => {
+        clientDisconnected = true;
+      });
 
       try {
-        fullResponseText = await GeminiService.generateChatStream({
-          prompt: prompt.trim(),
+        const streamResult = await GeminiService.generateChatStream({
+          prompt: cleanPrompt,
           bookContext,
           userNotes,
           readingHistory,
           conversationHistory,
           onChunk: (chunk) => {
-            res.write(`data: ${JSON.stringify({ chunk, chatId: convId })}\n\n`);
+            if (!clientDisconnected) {
+              res.write(`data: ${JSON.stringify({ chunk, chatId: convId })}\n\n`);
+            }
           }
         });
 
-        // Persist messages atomically after streaming completes
-        const now = new Date().toISOString();
-        await ChatRepo.appendMessages(convId, [
-          { role: 'user', content: prompt.trim(), timestamp: now },
-          { role: 'assistant', content: fullResponseText, timestamp: now }
-        ]);
+        const fullResponseText = streamResult.text || '';
 
-        res.write(`data: ${JSON.stringify({ done: true, chatId: convId, fullText: fullResponseText })}\n\n`);
-        return res.end();
+        // Persist messages atomically after streaming completes
+        if (!clientDisconnected) {
+          const now = new Date().toISOString();
+          await ChatRepo.appendMessages(convId, [
+            { role: 'user', content: cleanPrompt, timestamp: now },
+            { role: 'assistant', content: fullResponseText, timestamp: now }
+          ]);
+
+          res.write(`data: ${JSON.stringify({ 
+            done: true, 
+            chatId: convId, 
+            fullText: fullResponseText, 
+            isFallback: streamResult.isFallback 
+          })}\n\n`);
+          return res.end();
+        }
       } catch (streamErr) {
-        console.error('Streaming handler error:', streamErr);
-        res.write(`data: ${JSON.stringify({ error: 'Streaming interrupted', done: true })}\n\n`);
-        return res.end();
+        console.error('Streaming handler error:', streamErr.message);
+        if (!clientDisconnected) {
+          res.write(`data: ${JSON.stringify({ error: 'Streaming interrupted', done: true })}\n\n`);
+          return res.end();
+        }
       }
+      return;
     }
 
     // Standard Non-streaming response
-    const aiResponseText = await GeminiService.generateChatResponse({
-      prompt: prompt.trim(),
+    const chatResult = await GeminiService.generateChatResponse({
+      prompt: cleanPrompt,
       bookContext,
       userNotes,
       readingHistory,
       conversationHistory
     });
 
+    const aiResponseText = chatResult.text || '';
     const now = new Date().toISOString();
     const savedChat = await ChatRepo.appendMessages(convId, [
-      { role: 'user', content: prompt.trim(), timestamp: now },
+      { role: 'user', content: cleanPrompt, timestamp: now },
       { role: 'assistant', content: aiResponseText, timestamp: now }
     ]);
 
     return res.json({
       chatId: convId,
       response: aiResponseText,
+      isFallback: chatResult.isFallback,
       messages: savedChat ? savedChat.messages : []
     });
   } catch (error) {
-    console.error('AI chat error:', error);
+    console.error('AI chat error:', error.message);
     return res.status(500).json({
       message: 'BookMind AI could not process that request right now. Please try again.'
     });
@@ -153,22 +177,27 @@ const getRecommendations = async (req, res) => {
     const readingHistory = Array.isArray(booksData) ? booksData : (booksData.books || []);
     const userNotes = Array.isArray(notesData) ? notesData : (notesData.notes || []);
 
-    const recommendations = await GeminiService.generateRecommendations({
+    const recResult = await GeminiService.generateRecommendations({
       readingHistory,
       favoriteGenres: (user && user.favoriteGenres) ? user.favoriteGenres : [],
       userNotes
     });
 
+    const recommendations = recResult.recommendations || [];
+
     // Save to cache with 12-hour TTL
-    await RecommendationRepo.saveRecommendations(userId, recommendations, 12);
+    if (recommendations.length > 0) {
+      await RecommendationRepo.saveRecommendations(userId, recommendations, 12);
+    }
 
     return res.json({
       recommendations,
       cached: false,
+      isFallback: recResult.isFallback || false,
       generatedAt: new Date().toISOString()
     });
   } catch (error) {
-    console.error('getRecommendations error:', error);
+    console.error('getRecommendations error:', error.message);
     return res.status(500).json({ message: 'Failed to generate recommendations.' });
   }
 };
@@ -181,6 +210,7 @@ const getChatHistory = async (req, res) => {
     const chats = await ChatRepo.findByUser(userId, bookId || null);
     return res.json({ chats });
   } catch (error) {
+    console.error('getChatHistory error:', error.message);
     return res.status(500).json({ message: 'Failed to fetch chat history.' });
   }
 };
@@ -190,14 +220,19 @@ const clearChatHistory = async (req, res) => {
     const userId = req.user.id;
     const chatId = req.params.id;
 
+    if (!chatId) {
+      return res.status(400).json({ message: 'Chat ID is required.' });
+    }
+
     const chat = await ChatRepo.findById(chatId);
     if (!chat || String(chat.userId) !== String(userId)) {
-      return res.status(404).json({ message: 'Chat conversation not found.' });
+      return res.status(404).json({ message: 'Chat conversation not found in your account.' });
     }
 
     await ChatRepo.deleteById(chatId);
     return res.json({ message: 'Conversation cleared successfully.' });
   } catch (error) {
+    console.error('clearChatHistory error:', error.message);
     return res.status(500).json({ message: 'Failed to clear chat.' });
   }
 };

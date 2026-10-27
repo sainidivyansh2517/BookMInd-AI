@@ -7,6 +7,7 @@ import { Button } from '../components/ui/Button';
 import { BookCover } from '../components/books/BookCover';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 
 const fetchRecommendations = async ({ signal }) => {
   const res = await axios.get('/api/ai/recommendations', { signal });
@@ -14,6 +15,7 @@ const fetchRecommendations = async ({ signal }) => {
 };
 
 export const RecommendationsPage = () => {
+  const { user } = useAuth();
   const [addingTitle, setAddingTitle] = useState(null);
   const [addedMap, setAddedMap] = useState({});
   const { addToast } = useToast();
@@ -27,16 +29,19 @@ export const RecommendationsPage = () => {
     refetch,
     isFetching,
   } = useQuery({
-    queryKey: ['recommendations'],
+    queryKey: ['recommendations', user?.id],
     queryFn: fetchRecommendations,
     staleTime: 10 * 60 * 1000, // 10 min client-side freshness (server caches for 12h)
+    enabled: !!user?.id,
     retry: 1,
   });
+
+  const showLoading = !user?.id || loading;
 
   const handleRefresh = async () => {
     // Force server-side cache invalidation by using ?refresh=true
     await axios.get('/api/ai/recommendations?refresh=true');
-    queryClient.invalidateQueries({ queryKey: ['recommendations'] });
+    queryClient.invalidateQueries({ queryKey: ['recommendations', user?.id] });
   };
 
   const handleAddRecommendation = async (rec) => {
@@ -53,7 +58,7 @@ export const RecommendationsPage = () => {
       setAddedMap((prev) => ({ ...prev, [rec.title]: true }));
       addToast(`"${rec.title}" added to your library!`, 'success');
       // Books changed — invalidate cache so dashboard reflects it
-      queryClient.invalidateQueries({ queryKey: ['books'] });
+      queryClient.invalidateQueries({ queryKey: ['books', user?.id] });
     } catch (err) {
       addToast(err.response?.data?.message || 'Could not add book.', 'error');
     } finally {
@@ -99,7 +104,7 @@ export const RecommendationsPage = () => {
         )}
 
         {/* Recommendations List */}
-        {loading ? (
+        {showLoading ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
             <SkeletonCard />
             <SkeletonCard />
@@ -161,7 +166,7 @@ export const RecommendationsPage = () => {
               );
             })}
           </div>
-        ) : !isError && !loading ? (
+        ) : !isError && !showLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
             Read a few books and capture notes to enable AI recommendations!
           </div>

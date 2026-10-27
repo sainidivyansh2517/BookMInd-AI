@@ -33,43 +33,51 @@ export const DashboardPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  // Independent query per section — none blocks the others
+  // Independent query per section — strictly scoped to authenticated user ID
   const {
     data: books = [],
     isLoading: isBooksLoading,
   } = useQuery({
-    queryKey: ['books'],
+    queryKey: ['books', user?.id],
     queryFn: fetchBooks,
     staleTime: 2 * 60 * 1000,
+    enabled: !!user?.id,
   });
 
   const {
     data: notes = [],
     isLoading: isNotesLoading,
   } = useQuery({
-    queryKey: ['notes'],
+    queryKey: ['notes', user?.id],
     queryFn: fetchNotes,
     staleTime: 2 * 60 * 1000,
+    enabled: !!user?.id,
   });
 
-  // AI recs are FULLY independent — no blocking
+  // AI recs are FULLY independent — scoped to authenticated user
   const {
     data: recommendations = [],
     isLoading: isRecsLoading,
     isError: isRecsError,
     refetch: refetchRecs,
   } = useQuery({
-    queryKey: ['recommendations'],
+    queryKey: ['recommendations', user?.id],
     queryFn: fetchRecommendations,
     staleTime: 10 * 60 * 1000, // 10 min — they're server-cached for 12h
     retry: 1,
+    enabled: !!user?.id,
   });
+
+  // Guard loading states: never display stale content when switching accounts
+  const showBooksLoading = !user?.id || isBooksLoading;
+  const showNotesLoading = !user?.id || isNotesLoading;
+  const showRecsLoading = !user?.id || isRecsLoading;
 
   // Invalidate books + notes when a book is added via AppShell
   const handleBookAdded = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['books'] });
-    queryClient.invalidateQueries({ queryKey: ['notes'] });
-  }, [queryClient]);
+    queryClient.invalidateQueries({ queryKey: ['books', user?.id] });
+    queryClient.invalidateQueries({ queryKey: ['notes', user?.id] });
+  }, [queryClient, user?.id]);
 
   // Dynamic Greeting based on hour
   const getGreeting = () => {
@@ -107,7 +115,7 @@ export const DashboardPage = () => {
 
         {/* 4 KPI Cards — render once books load, skeletons until then */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-          {isBooksLoading ? (
+          {showBooksLoading ? (
             <>
               {[...Array(4)].map((_, i) => (
                 <div key={i} style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '20px', display: 'flex', gap: '16px', alignItems: 'center' }}>
@@ -145,7 +153,7 @@ export const DashboardPage = () => {
               )}
             </div>
 
-            {isBooksLoading ? (
+            {showBooksLoading ? (
               <SkeletonCard />
             ) : activeBook ? (
               <div style={{ display: 'flex', gap: '20px', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-xl)', padding: '24px', boxShadow: 'var(--shadow-sm)' }}>
@@ -204,7 +212,7 @@ export const DashboardPage = () => {
               </button>
             </div>
 
-            {isNotesLoading ? (
+            {showNotesLoading ? (
               <>
                 <SkeletonRow />
                 <SkeletonRow />
@@ -237,7 +245,7 @@ export const DashboardPage = () => {
               <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                 Recommended for You
               </h2>
-              {isRecsLoading && (
+              {showRecsLoading && (
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
                   Personalizing...
                 </span>
@@ -248,7 +256,7 @@ export const DashboardPage = () => {
             </button>
           </div>
 
-          {isRecsLoading ? (
+          {showRecsLoading ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
               {[...Array(3)].map((_, i) => (
                 <div key={i} style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>

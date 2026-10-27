@@ -12,7 +12,7 @@ import './styles/index.css';
 
 // Set global API base URL for production deployments (if separate backend host is used)
 if (import.meta.env.VITE_API_URL) {
-  axios.defaults.baseURL = import.meta.env.VITE_API_URL;
+  axios.defaults.baseURL = import.meta.env.VITE_API_URL.replace(/\/+$/, '');
 }
 
 const queryClient = new QueryClient({

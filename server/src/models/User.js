@@ -16,32 +16,52 @@ const MongoUser = mongoose.model('User', userSchema);
 
 class UserRepo {
   static async findByEmail(email) {
+    if (!email || typeof email !== 'string') return null;
+    const cleanEmail = email.toLowerCase().trim();
     if (getIsMongoConnected()) {
-      return await MongoUser.findOne({ email: email.toLowerCase() });
+      return await MongoUser.findOne({ email: cleanEmail });
     }
-    return usersStore.findOne({ email: email.toLowerCase() });
+    return usersStore.findOne({ email: cleanEmail });
   }
 
   static async findById(id) {
+    if (!id) return null;
     if (getIsMongoConnected()) {
-      return await MongoUser.findById(id);
+      return await MongoUser.findById(id).select('-passwordHash');
     }
-    return usersStore.findById(id);
+    const user = usersStore.findById(id);
+    if (user) {
+      const copy = { ...user };
+      delete copy.passwordHash;
+      return copy;
+    }
+    return null;
   }
 
   static async create(userData) {
+    const cleanData = {
+      ...userData,
+      email: userData.email ? userData.email.toLowerCase().trim() : ''
+    };
     if (getIsMongoConnected()) {
-      const u = new MongoUser(userData);
+      const u = new MongoUser(cleanData);
       return await u.save();
     }
-    return usersStore.create(userData);
+    return usersStore.create(cleanData);
   }
 
   static async updateById(id, updateData) {
+    // Prevent overriding sensitive auth credentials via general update
+    const sanitized = { ...updateData };
+    delete sanitized.passwordHash;
+    delete sanitized.email;
+    delete sanitized._id;
+    delete sanitized.id;
+
     if (getIsMongoConnected()) {
-      return await MongoUser.findByIdAndUpdate(id, updateData, { new: true }).select('-passwordHash');
+      return await MongoUser.findByIdAndUpdate(id, sanitized, { new: true }).select('-passwordHash');
     }
-    const updated = usersStore.findByIdAndUpdate(id, updateData);
+    const updated = usersStore.findByIdAndUpdate(id, sanitized);
     if (updated) {
       delete updated.passwordHash;
     }

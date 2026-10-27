@@ -150,6 +150,13 @@ class NoteRepo {
     }
     return notesStore.findByIdAndDelete(id);
   }
+
+  static async deleteByBook(userId, bookId) {
+    if (getIsMongoConnected()) {
+      return await MongoNote.deleteMany({ userId, bookId });
+    }
+    return notesStore.deleteMany({ userId, bookId });
+  }
 }
 
 module.exports = { NoteRepo, MongoNote };

@@ -26,8 +26,17 @@ export const ProfilePage = () => {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetchProfileData();
-  }, []);
+    if (user?.id) {
+      setName(user.name || '');
+      setReadingGoal(user.readingGoal || 24);
+      setGenresInput((user.favoriteGenres || []).join(', '));
+      fetchProfileData();
+    } else {
+      setBooks([]);
+      setNotes([]);
+      setLoading(true);
+    }
+  }, [user?.id, user?.name, user?.readingGoal, user?.favoriteGenres]);
 
   const fetchProfileData = async () => {
     try {
@@ -211,13 +220,13 @@ export const ProfilePage = () => {
           >
             <div style={{ padding: '16px', backgroundColor: 'var(--bg-surface-subtle)', borderRadius: 'var(--radius-lg)' }}>
               <div style={{ color: 'var(--accent-primary)', marginBottom: '4px' }}><BookOpen size={20} /></div>
-              <div style={{ fontFamily: 'var(--font-serif)', fontSize: '1.5rem', fontWeight: 700 }}>{books.length}</div>
+              <div style={{ fontFamily: 'var(--font-serif)', fontSize: '1.5rem', fontWeight: 700 }}>{loading ? '—' : books.length}</div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Total Books in Library</div>
             </div>
 
             <div style={{ padding: '16px', backgroundColor: 'var(--bg-surface-subtle)', borderRadius: 'var(--radius-lg)' }}>
               <div style={{ color: 'var(--status-success)', marginBottom: '4px' }}><FileText size={20} /></div>
-              <div style={{ fontFamily: 'var(--font-serif)', fontSize: '1.5rem', fontWeight: 700 }}>{notes.length}</div>
+              <div style={{ fontFamily: 'var(--font-serif)', fontSize: '1.5rem', fontWeight: 700 }}>{loading ? '—' : notes.length}</div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Saved Personal Notes</div>
             </div>
           </div>

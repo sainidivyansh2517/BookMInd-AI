@@ -6,9 +6,11 @@ import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { BookCover } from './BookCover';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
 import { useQueryClient } from '@tanstack/react-query';
 
 export const BookSearchModal = ({ isOpen, onClose, onBookAdded }) => {
+  const { user } = useAuth();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -81,7 +83,7 @@ export const BookSearchModal = ({ isOpen, onClose, onBookAdded }) => {
       addToast(`"${book.title}" added to your library!`, 'success');
 
       // Invalidate shared books cache
-      queryClient.invalidateQueries({ queryKey: ['books'] });
+      queryClient.invalidateQueries({ queryKey: ['books', user?.id] });
 
       if (onBookAdded) onBookAdded();
     } catch (err) {

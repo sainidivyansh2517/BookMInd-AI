@@ -10,15 +10,23 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { SkeletonRow } from '../components/ui/Skeleton';
 import { NoteEditorModal } from '../components/notes/NoteEditorModal';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 
 const fetchNotes = async ({ signal }) => {
   const res = await axios.get('/api/notes', { signal });
   return res.data.notes || [];
 };
 
+const fetchBooks = async ({ signal }) => {
+  const res = await axios.get('/api/books', { signal });
+  return res.data.books || [];
+};
+
 export const NotesPage = () => {
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
-  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingNote, setEditingNote] = useState(null);
   const { addToast } = useToast();
   const queryClient = useQueryClient();
 
@@ -26,31 +34,76 @@ export const NotesPage = () => {
     data: notes = [],
     isLoading: loading,
   } = useQuery({
-    queryKey: ['notes'],
+    queryKey: ['notes', user?.id],
     queryFn: ({ signal }) => fetchNotes({ signal }),
     staleTime: 2 * 60 * 1000,
+    enabled: !!user?.id,
   });
 
-  // Client-side filtering — notes already in cache
+  const {
+    data: books = []
+  } = useQuery({
+    queryKey: ['books', user?.id],
+    queryFn: ({ signal }) => fetchBooks({ signal }),
+    staleTime: 5 * 60 * 1000,
+    enabled: !!user?.id,
+  });
+
+  const showLoading = !user?.id || loading;
+
+  // Client-side filtering across title, content, book title, and tags
   const filteredNotes = notes.filter((note) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase().trim();
     return (
+      (note.title && note.title.toLowerCase().includes(q)) ||
       (note.content && note.content.toLowerCase().includes(q)) ||
-      (note.chapter && note.chapter.toLowerCase().includes(q)) ||
       (note.book?.title && note.book.title.toLowerCase().includes(q)) ||
       (note.tags && note.tags.some((t) => t.toLowerCase().includes(q)))
     );
   });
 
-  const handleNoteCreated = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['notes'] });
-  }, [queryClient]);
+  const handleOpenCreate = () => {
+    setEditingNote(null);
+    setModalOpen(true);
+  };
 
-  const handleNoteDeleted = useCallback((noteId) => {
-    // Optimistic update — remove from cache immediately
-    queryClient.setQueryData(['notes'], (old = []) => old.filter((n) => (n._id || n.id) !== noteId));
-  }, [queryClient]);
+  const handleOpenEdit = (note) => {
+    setEditingNote(note);
+    setModalOpen(true);
+  };
+
+  const handleSaveNote = async (noteData) => {
+    try {
+      if (noteData.id) {
+        await axios.put(`/api/notes/${noteData.id}`, noteData);
+        addToast('Note updated successfully!', 'success');
+      } else {
+        await axios.post('/api/notes', noteData);
+        addToast('Note created successfully!', 'success');
+      }
+      queryClient.invalidateQueries({ queryKey: ['notes', user?.id] });
+      setModalOpen(false);
+      setEditingNote(null);
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Failed to save note.', 'error');
+      throw err;
+    }
+  };
+
+  const handleDeleteNote = async (noteId) => {
+    if (!window.confirm('Are you sure you want to delete this note?')) {
+      return;
+    }
+
+    try {
+      await axios.delete(`/api/notes/${noteId}`);
+      queryClient.setQueryData(['notes', user?.id], (old = []) => old.filter((n) => (n._id || n.id) !== noteId));
+      addToast('Note deleted successfully.', 'info');
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Failed to delete note.', 'error');
+    }
+  };
 
   return (
     <AppShell>
@@ -66,7 +119,7 @@ export const NotesPage = () => {
               {notes.length > 0 ? `${notes.length} notes across your library — your personal knowledge base.` : 'Start capturing ideas from what you read.'}
             </p>
           </div>
-          <Button icon={PenSquare} onClick={() => setCreateModalOpen(true)}>
+          <Button icon={PenSquare} onClick={handleOpenCreate}>
             New Note
           </Button>
         </div>
@@ -74,20 +127,20 @@ export const NotesPage = () => {
         {/* Search Bar */}
         <Input
           icon={Search}
-          placeholder="Search notes by content, chapter, book title, or tags..."
+          placeholder="Search notes by title, content, book title, or tags..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
 
         {/* Results Count */}
-        {searchQuery && !loading && (
+        {searchQuery && !showLoading && (
           <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: '-12px' }}>
             {filteredNotes.length === 0 ? 'No results for that search.' : `${filteredNotes.length} note${filteredNotes.length !== 1 ? 's' : ''} match "${searchQuery}"`}
           </p>
         )}
 
         {/* Notes List */}
-        {loading ? (
+        {showLoading ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <SkeletonRow />
             <SkeletonRow />
@@ -100,7 +153,8 @@ export const NotesPage = () => {
               <NoteCard
                 key={note._id || note.id}
                 note={note}
-                onDeleted={() => handleNoteDeleted(note._id || note.id)}
+                onEdit={handleOpenEdit}
+                onDelete={handleDeleteNote}
               />
             ))}
           </div>
@@ -109,16 +163,18 @@ export const NotesPage = () => {
             title="No notes yet"
             description="Capture quotes, chapter summaries, or personal insights from your books. Build your own knowledge base over time."
             actionLabel="Write First Note"
-            onAction={() => setCreateModalOpen(true)}
+            onAction={handleOpenCreate}
           />
         )}
 
       </div>
 
       <NoteEditorModal
-        isOpen={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
-        onSave={handleNoteCreated}
+        isOpen={modalOpen}
+        onClose={() => { setModalOpen(false); setEditingNote(null); }}
+        note={editingNote}
+        userBooks={books}
+        onSave={handleSaveNote}
       />
     </AppShell>
   );

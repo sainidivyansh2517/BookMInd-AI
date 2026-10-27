@@ -42,6 +42,7 @@ export const BookDetailsPage = () => {
 
   // Note Modal
   const [noteModalOpen, setNoteModalOpen] = useState(false);
+  const [editingNote, setEditingNote] = useState(null);
 
   useEffect(() => {
     fetchBookDetails();
@@ -112,9 +113,25 @@ export const BookDetailsPage = () => {
         await axios.post('/api/notes', { ...noteData, bookId: id });
       }
       addToast('Note saved successfully!', 'success');
+      setNoteModalOpen(false);
+      setEditingNote(null);
       fetchBookDetails();
     } catch (err) {
-      addToast('Failed to save note.', 'error');
+      addToast(err.response?.data?.message || 'Failed to save note.', 'error');
+      throw err;
+    }
+  };
+
+  const handleDeleteNote = async (noteId) => {
+    if (!window.confirm('Are you sure you want to delete this note?')) {
+      return;
+    }
+    try {
+      await axios.delete(`/api/notes/${noteId}`);
+      addToast('Note deleted successfully.', 'info');
+      fetchBookDetails();
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Failed to delete note.', 'error');
     }
   };
 
@@ -301,7 +318,7 @@ export const BookDetailsPage = () => {
             <h3 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-primary)' }}>
               Your Notes on "{book.title}" ({notes.length})
             </h3>
-            <Button size="sm" icon={Plus} onClick={() => setNoteModalOpen(true)}>
+            <Button size="sm" icon={Plus} onClick={() => { setEditingNote(null); setNoteModalOpen(true); }}>
               New Note
             </Button>
           </div>
@@ -309,7 +326,12 @@ export const BookDetailsPage = () => {
           {notes.length > 0 ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
               {notes.map((note) => (
-                <NoteCard key={note._id || note.id} note={{ ...note, book }} />
+                <NoteCard
+                  key={note._id || note.id}
+                  note={{ ...note, book }}
+                  onEdit={(n) => { setEditingNote(n); setNoteModalOpen(true); }}
+                  onDelete={handleDeleteNote}
+                />
               ))}
             </div>
           ) : (
@@ -317,7 +339,7 @@ export const BookDetailsPage = () => {
               <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
                 You haven't added any notes for this book yet.
               </p>
-              <Button size="sm" icon={Plus} onClick={() => setNoteModalOpen(true)}>
+              <Button size="sm" icon={Plus} onClick={() => { setEditingNote(null); setNoteModalOpen(true); }}>
                 Add First Note
               </Button>
             </div>
@@ -331,7 +353,8 @@ export const BookDetailsPage = () => {
 
       <NoteEditorModal
         isOpen={noteModalOpen}
-        onClose={() => setNoteModalOpen(false)}
+        onClose={() => { setNoteModalOpen(false); setEditingNote(null); }}
+        note={editingNote}
         userBooks={[book]}
         onSave={handleSaveNote}
       />
