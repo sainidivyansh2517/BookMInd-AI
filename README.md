@@ -23,7 +23,7 @@ Avid readers and lifelong learners frequently struggle with **retention, note fr
 3. **AI Reading Companion**: Ask natural-language questions about saved books, synthesize takeaways across personal notes, and discover high-signal connections using Google Gemini.
 4. **Deterministic Failover & Offline Engine**: When external AI services experience quota limits or service interruptions, BookMind AI automatically falls back to an offline synthesis engine, ensuring zero user disruption.
 
-*Live Web Application:* [https://book-m-ind-ai.vercel.app](https://book-m-ind-ai.vercel.app/) *(Production deployment — verify hosted backend health via `/api/health`)*
+*Live Web Application:* [https://book-m-ind-ai.vercel.app](https://book-m-ind-ai-five.vercel.app/) *(Production deployment — verify hosted backend health via `/api/health`)*
 
 ---
 
